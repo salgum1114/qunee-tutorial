@@ -16,6 +16,9 @@ var Main = React.createClass({
             graph: null,
             nodes: [],
             groups: [],
+            gateways: [],
+            connectors: [],
+            gatewayIndex: 1,
             taskIndex: 1,
             groupIndex: 1
         }
@@ -29,17 +32,40 @@ var Main = React.createClass({
         }, this);
         graph.ondblclick = function(evt){
             var element = evt.getData();
-            if(element){
-                element.showDetail = !element.showDetail;
+            if(element instanceof Q.Group) {
+                var target = graph.hitTest(evt);
+                if(target.type == 'GroupLabel') {
+                    return;
+                } else {
+                    element.showSummary = !element.showSummary;
+                }
+            }
+        }
+        graph.onclick = function(evt) {
+            var data = evt.getData();
+            if(data instanceof Q.Group) {
+                var target = graph.hitTest(evt);
+                if(target && target.type == 'GroupHandle') {
+                    data.reverseExpanded = !data.reverseExpanded;
+                }
             }
         }
         var addTask = this.addTask;
+        var addTaskGroup = this.addTaskGroup;
+        var addGateway = this.addGateway;
         $("#toolbox div img").draggable({helper: "clone"});
         $('#' + canvasDiv).droppable({
             accept: 'img',
             drop: function(event, ui) {
-                
-                addTask(graph, canvasDiv, event);
+                var type = ui.draggable.attr('draginfo');
+                var jsonData = JSON.parse(type);
+                if(jsonData.type === 'Node') {
+                    addTask(graph, canvasDiv, event);
+                } else if(jsonData.type === 'Group') {
+                    addTaskGroup(graph, canvasDiv, event);
+                } else if(jsonData.type === 'Gateway') {
+                    addGateway(graph, canvasDiv, event);
+                }
             }
         });
         setInterval(this.timer, 2000);
@@ -50,20 +76,19 @@ var Main = React.createClass({
         var target = event.target;
         var selectType = target.getAttribute('selectType');
         var lineType = target.getAttribute('lineType');
-
+        var edgeType = target.getAttribute('edgeType');
         if(selectType === 'edge') {
-            graph.interactionMode = Q.Consts.INTERACTION_MODE_CREATE_EDGE;
-            if(lineType === 'arrow') {
-                this.addConnector(graph, lineType);
-            } else if(lineType === 'line1') {
-                this.addConnector(graph, lineType);
-            } else if(lineType === 'line2') {
-                this.addConnector(graph, lineType);
-            }
+            graph.interactionMode = Q.Consts.INTERACTION_MODE_CREATE_SIMPLE_EDGE;
+            graph.interactionProperties = {
+                edgeType: Q.Consts.EDGE_TYPE_VERTICAL_HORIZONTAL
+            };
+            this.addConnector(graph, lineType, Q.Consts.EDGE_TYPE_VERTICAL_HORIZONTAL);
         } else if(selectType === 'default') {
             graph.interactionMode = Q.Consts.INTERACTION_MODE_DEFAULT;
         } else if(selectType === 'selection') {
             graph.interactionMode = Q.Consts.INTERACTION_MODE_SELECTION;
+        } else if(selectType === 'viewmode') {
+            graph.interactionMode = Q.Consts.INTERACTION_MODE_VIEW;
         }
     },
     handleNodeClick: function(graph) {
@@ -87,7 +112,6 @@ var Main = React.createClass({
         }
         graph.selectionChangeDispatcher.addListener(function (evt) {
             var data = evt.data;
-            
             if (!data) {
                 return;
             }
@@ -100,21 +124,38 @@ var Main = React.createClass({
             }
         }, this);
     },
-    addConnector: function(graph, lineType) {
+    addConnector: function(graph, lineType, edgeType) {
+        var testConnectorInfo = this.testConnectorInfo;
         graph.graphModel.listChangeDispatcher.addListener({
             onEvent: function(evt) {
-                if(evt.kind === 'add' && (Q.Consts.INTERACTION_MODE_CREATE_EDGE === graph.interactionMode)) {
+                console.log(evt);
+                if(evt.kind === 'add' && (Q.Consts.INTERACTION_MODE_CREATE_EDGE === graph.interactionMode
+                || Q.Consts.INTERACTION_MODE_CREATE_SIMPLE_EDGE === graph.interactionMode)) {
                     var edge = evt.data;
-                    if(lineType === 'arrow') {
-                        edge.setStyle(Q.Styles.ARROW_TO, true);
-                        edge.setStyle(Q.Styles.EDGE_LINE_DASH, false);
-                    } else if(lineType === 'line1'){
-                        edge.setStyle(Q.Styles.ARROW_TO, false);
-                        edge.setStyle(Q.Styles.EDGE_LINE_DASH, false);
-                    } else if(lineType === 'line2') {
-                        edge.setStyle(Q.Styles.ARROW_TO, false);
-                        edge.setStyle(Q.Styles.EDGE_LINE_DASH, [5, 3]);
-                    }
+                    console.log(evt.data);
+                    var connectorInfo = {
+                        name: lineType,
+                        lineType: lineType,
+                        edgeType: edgeType,
+                        from: edge.from,
+                        to: edge.to
+                    };
+                    var connector = new QuneeModule.Connector(testConnectorInfo(connectorInfo));
+                    console.log(connector);
+                    edge.name = lineType;
+                    console.log(evt.data);
+                    // if(lineType === 'success') {
+                    //     edge.name = '성공';
+                    //     edge.setStyle(Q.Styles.ARROW_TO, true);
+                    //     // edge.setStyle(Q.Styles.EDGE_LINE_DASH, false);
+                    // } else if(lineType === 'fail'){
+                    //     edge.name = '실패';
+                    //     edge.setStyle(Q.Styles.ARROW_TO, true);
+                    //     // edge.setStyle(Q.Styles.EDGE_LINE_DASH, false);
+                    // } else if(lineType === 'normal') {
+                    //     edge.setStyle(Q.Styles.ARROW_TO, false);
+                    //     // edge.setStyle(Q.Styles.EDGE_LINE_DASH, [5, 3]);
+                    // }
                 }
             }
         });
@@ -124,7 +165,7 @@ var Main = React.createClass({
         var positionX = parseInt((event.pageX - canvasDiv.offset().left - graph.tx) / graph.scale);
 	    var positionY = parseInt((event.pageY - canvasDiv.offset().top  - graph.ty) / graph.scale);
         
-        var taskGroup = new QuneeModule.TaskGroup(this.testGroupInfo(positionX, positionY));
+        var taskGroup = new QuneeModule.TaskGroup(this.testGroupInfo(positionX, positionY), this.testGroupData());
         var model = graph.graphModel.add(taskGroup);
         var groups = this.state.groups;
         this.setState({groups: groups.concat(taskGroup)});
@@ -135,11 +176,21 @@ var Main = React.createClass({
         var canvasDiv = $("#" + canvasDiv);
         var positionX = parseInt((event.pageX - canvasDiv.offset().left - graph.tx) / graph.scale);
 	    var positionY = parseInt((event.pageY - canvasDiv.offset().top  - graph.ty) / graph.scale);
-
-        var taskNode = new QuneeModule.TaskNode(this.testInfo(positionX, positionY), this.testData());
+        var taskNode = new QuneeModule.TaskNode(this.testInfo(positionX, positionY), this.testTaskData());
         var model = graph.graphModel.add(taskNode);
         var nodes = this.state.nodes;
         this.setState({nodes: nodes.concat(taskNode)});
+        model.x = positionX;
+        model.y = positionY;
+    },
+    addGateway: function(graph, canvasDiv, event) {
+        var canvasDiv = $("#" + canvasDiv);
+        var positionX = parseInt((event.pageX - canvasDiv.offset().left - graph.tx) / graph.scale);
+	    var positionY = parseInt((event.pageY - canvasDiv.offset().top  - graph.ty) / graph.scale);
+        var gateway = new QuneeModule.Gateway(this.testGatewayInfo(positionX, positionY));
+        var model = graph.graphModel.add(gateway);
+        var gateways = this.state.gateways;
+        this.setState({gateways: gateways.concat(gateway)});
         model.x = positionX;
         model.y = positionY;
     },
@@ -156,17 +207,25 @@ var Main = React.createClass({
 				uuid += (i === 12 ? 4 : (i === 16 ? (random & 3 | 8) : random))
 					.toString(16);
 			}
-
 			return uuid;
     },
     timer: function() {
         var nodes = this.state.nodes;
-        nodes.forEach(function(node) {
-            node.set('progress', this.testData().progress);
-            node.set('waiting', this.testData().waiting);
-            node.set('running', this.testData().running);
-            node.set('success', this.testData().success);
-            node.set('fail', this.testData().fail);
+        var groups = this.state.groups;
+        nodes.forEach(function (task) {
+            if (!(task instanceof Q.Node)) {
+                return;
+            }
+            task.set('runningColor', Q.toColor(0x7D847D));
+            task.set('successColor', Q.toColor(0x00FF00));
+            task.set('failColor', Q.toColor(0xFF0000));
+            task.dataUpdate(this.testTaskData());
+        }, this)
+        groups.forEach(function(group) {
+            if (!(group instanceof Q.Group)) {
+                return;
+            }
+            group.dataUpdate(this.testGroupData());
         }, this);
     },
     testInfo: function(positionX, positionY) {
@@ -206,24 +265,65 @@ var Main = React.createClass({
             id: this.uuid(),
             description: 'test group description',
             savePath: 'C:\programfiles',
-            image: "images/executescript.png",
+            image: "images/MultiTaskJob.png",
             positionX: positionX,
-            positionY: positionY
+            positionY: positionY,
+            startDate: '2016-08-17',
+            endDate: '2016-08-18'
         }
         return groupInfo;
     },
-    testData: function() {
-        var taskData = {
+    testConnectorInfo: function(connectorInfo) {
+        var connectorInfo = {
+            name: connectorInfo.name,
+            id: this.uuid(),
+            description: 'test edge description',
+            lineType: connectorInfo.lineType,
+            edgeType: connectorInfo.edgeType,
+            from: connectorInfo.from,
+            to: connectorInfo.to
+        }
+        return connectorInfo;
+    },
+    testGatewayInfo: function(positionX, positionY) {
+        var length = this.state.gateways.length;
+        var index = this.state.gatewayIndex;
+        if(length == 0) {
+            this.setState({gatewayIndex: 1});
+            index = this.state.gatewayIndex;
+        } else {
+            this.setState({gatewayIndex: index+1});
+            index = this.state.gatewayIndex;
+        }
+        var gatewayInfo = {
+            name: 'new gateway' + index,
+            id: this.uuid(),
+            description: 'test gateway description',
+            savePath: 'C:\programfiles',
+            image: "images/diamond.png",
+            positionX: positionX,
+            positionY: positionY,
+        }
+        return gatewayInfo;
+    },
+    testGroupData: function() {
+        var groupData = {
             progress: Math.random(),
+            total: formatNumber(Math.random() * 100, ''),
             waiting: formatNumber(Math.random() * 100, ''),
             running: formatNumber(Math.random() * 100, ''),
             success: formatNumber(Math.random() * 100, ''),
             fail: formatNumber(Math.random() * 100, '')
         }
-        return taskData;
+        return groupData;
     },
-    addGateway: function() {
-
+    testTaskData: function() {
+        var taskData = {
+            running: formatNumber(Math.random() * 10, ''),
+            success: formatNumber(Math.random() * 10, ''),
+            fail: formatNumber(Math.random() * 10, '')
+        }
+        return taskData;
     },
     render: function() {
         var clientWidth = {
